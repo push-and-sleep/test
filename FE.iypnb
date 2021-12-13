@@ -1,0 +1,1909 @@
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import pandas as pd\n",
+    "import numpy as np\n",
+    "import gc\n",
+    "import joblib\n",
+    "import datetime"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 2,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import matplotlib.font_manager as font_manager\n",
+    "import matplotlib.pyplot as plt\n",
+    "%matplotlib inline\n",
+    "\n",
+    "font_dirs = ['/home/workspace/user-workspace/font']\n",
+    "font_files = font_manager.findSystemFonts(fontpaths=font_dirs)\n",
+    "\n",
+    "for font_file in font_files:\n",
+    "    font_manager.fontManager.addfont(font_file)\n",
+    "    \n",
+    "plt.rcParams['font.family'] = 'NanumGothic'"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "train_path = '/home/workspace/user-workspace/slim_train.parquet'\n",
+    "test_path ='/home/workspace/user-workspace/slim_test.parquet'\n",
+    "encoder = '/home/workspace/user-workspace/cat_encoder.json'\n",
+    "decoder = '/home/workspace/user-workspace/inverse_cat_encoder.json'\n",
+    "data_dir = '/home/workspace/user-workspace/junheon/data/task150/'"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 4,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "negative_ratio = 2\n",
+    "bagging_size = 5"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 5,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Filesystem                           Size  Used Avail Use% Mounted on\r\n",
+      "overlay                               48G   30G   16G  65% /\r\n",
+      "tmpfs                                 64M     0   64M   0% /dev\r\n",
+      "tmpfs                                 45G     0   45G   0% /sys/fs/cgroup\r\n",
+      "/dev/xvda1                            48G   30G   16G  65% /etc/hosts\r\n",
+      "shm                                   64M     0   64M   0% /dev/shm\r\n",
+      "/dev/xvdb1                           985G  4.3G  930G   1% /home/workspace/user-workspace\r\n",
+      "10.39.195.237:/SharedData/cnfrnc128  985G  189G  746G  21% /home/workspace/data\r\n",
+      "tmpfs                                 45G   12K   45G   1% /run/secrets/kubernetes.io/serviceaccount\r\n",
+      "tmpfs                                 45G   12K   45G   1% /proc/driver/nvidia\r\n",
+      "udev                                  45G     0   45G   0% /dev/nvidia0\r\n",
+      "tmpfs                                 45G     0   45G   0% /proc/acpi\r\n",
+      "tmpfs                                 45G     0   45G   0% /proc/scsi\r\n",
+      "tmpfs                                 45G     0   45G   0% /sys/firmware\r\n"
+     ]
+    }
+   ],
+   "source": [
+    "!df -h"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 6,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "train_df = pd.read_parquet(train_path).reset_index().rename(columns={\"index\": \"id\"})"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 7,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "test_df = pd.read_parquet(test_path).reset_index().rename(columns={\"index\": \"id\"})"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 8,
+   "metadata": {
+    "scrolled": true
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "              total        used        free      shared  buff/cache   available\r\n",
+      "Mem:          90614        6221       72735         275       11657       83489\r\n",
+      "Swap:             0           0           0\r\n"
+     ]
+    }
+   ],
+   "source": [
+    "!free -m"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 9,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/html": [
+       "<div>\n",
+       "<style scoped>\n",
+       "    .dataframe tbody tr th:only-of-type {\n",
+       "        vertical-align: middle;\n",
+       "    }\n",
+       "\n",
+       "    .dataframe tbody tr th {\n",
+       "        vertical-align: top;\n",
+       "    }\n",
+       "\n",
+       "    .dataframe thead th {\n",
+       "        text-align: right;\n",
+       "    }\n",
+       "</style>\n",
+       "<table border=\"1\" class=\"dataframe\">\n",
+       "  <thead>\n",
+       "    <tr style=\"text-align: right;\">\n",
+       "      <th></th>\n",
+       "      <th>id</th>\n",
+       "      <th>TRD_NO</th>\n",
+       "      <th>REQ_DD</th>\n",
+       "      <th>CP_CD</th>\n",
+       "      <th>CP_NM</th>\n",
+       "      <th>GODS_NM</th>\n",
+       "      <th>PAYR_SEQ</th>\n",
+       "      <th>MPHN_NO</th>\n",
+       "      <th>COMMC_CLF</th>\n",
+       "      <th>AC_PAY_AMT</th>\n",
+       "      <th>...</th>\n",
+       "      <th>MAX_NPAY_CNT_24M</th>\n",
+       "      <th>TRD_CNT_6M</th>\n",
+       "      <th>REAL_TRD_CNT_6M</th>\n",
+       "      <th>NIGHT_TRD_RT_6M</th>\n",
+       "      <th>AVG_AMT_6M</th>\n",
+       "      <th>MAX_LMT_3M_RT</th>\n",
+       "      <th>NPAY_CNT_24M</th>\n",
+       "      <th>NPAY_CNT_12MNTS</th>\n",
+       "      <th>NPAY_AMT_60M</th>\n",
+       "      <th>target</th>\n",
+       "    </tr>\n",
+       "  </thead>\n",
+       "  <tbody>\n",
+       "    <tr>\n",
+       "      <th>0</th>\n",
+       "      <td>0</td>\n",
+       "      <td>9iSJiZ+6F/ojR81Swb0CU5oBNWIuJuSsmXsb7aPoWro=</td>\n",
+       "      <td>20190701</td>\n",
+       "      <td>270</td>\n",
+       "      <td>308</td>\n",
+       "      <td>394324</td>\n",
+       "      <td>945077</td>\n",
+       "      <td>940112</td>\n",
+       "      <td>0</td>\n",
+       "      <td>49900</td>\n",
+       "      <td>...</td>\n",
+       "      <td>0</td>\n",
+       "      <td>5</td>\n",
+       "      <td>1</td>\n",
+       "      <td>0.6429</td>\n",
+       "      <td>111716.0</td>\n",
+       "      <td>0.49900</td>\n",
+       "      <td>1</td>\n",
+       "      <td>7</td>\n",
+       "      <td>0.0</td>\n",
+       "      <td>0</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>1</th>\n",
+       "      <td>1</td>\n",
+       "      <td>UStyI9p3TkoNswhaARv+Dzznl7NW4o49XlSEv/jy3/U=</td>\n",
+       "      <td>20190701</td>\n",
+       "      <td>837</td>\n",
+       "      <td>173</td>\n",
+       "      <td>735708</td>\n",
+       "      <td>1850868</td>\n",
+       "      <td>919223</td>\n",
+       "      <td>1</td>\n",
+       "      <td>14300</td>\n",
+       "      <td>...</td>\n",
+       "      <td>0</td>\n",
+       "      <td>5</td>\n",
+       "      <td>5</td>\n",
+       "      <td>0.4444</td>\n",
+       "      <td>30776.0</td>\n",
+       "      <td>0.21767</td>\n",
+       "      <td>0</td>\n",
+       "      <td>1</td>\n",
+       "      <td>0.0</td>\n",
+       "      <td>0</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>2</th>\n",
+       "      <td>2</td>\n",
+       "      <td>PgOykMEKX3so4zIpsNcU+zNt+Nj4VQdwjDB+NlVIJN4=</td>\n",
+       "      <td>20190702</td>\n",
+       "      <td>785</td>\n",
+       "      <td>539</td>\n",
+       "      <td>499519</td>\n",
+       "      <td>415916</td>\n",
+       "      <td>71968</td>\n",
+       "      <td>2</td>\n",
+       "      <td>440000</td>\n",
+       "      <td>...</td>\n",
+       "      <td>0</td>\n",
+       "      <td>6</td>\n",
+       "      <td>0</td>\n",
+       "      <td>0.1111</td>\n",
+       "      <td>177392.0</td>\n",
+       "      <td>1.00000</td>\n",
+       "      <td>0</td>\n",
+       "      <td>2</td>\n",
+       "      <td>0.0</td>\n",
+       "      <td>0</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>3</th>\n",
+       "      <td>3</td>\n",
+       "      <td>9ngELbCK8cqbPY53oe0eUY+tPvTR/OU7KIMg0pDdh4w=</td>\n",
+       "      <td>20190701</td>\n",
+       "      <td>1198</td>\n",
+       "      <td>7</td>\n",
+       "      <td>272349</td>\n",
+       "      <td>2477403</td>\n",
+       "      <td>568377</td>\n",
+       "      <td>1</td>\n",
+       "      <td>9907</td>\n",
+       "      <td>...</td>\n",
+       "      <td>0</td>\n",
+       "      <td>6</td>\n",
+       "      <td>6</td>\n",
+       "      <td>0.0645</td>\n",
+       "      <td>123318.0</td>\n",
+       "      <td>0.52973</td>\n",
+       "      <td>0</td>\n",
+       "      <td>0</td>\n",
+       "      <td>0.0</td>\n",
+       "      <td>0</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>4</th>\n",
+       "      <td>4</td>\n",
+       "      <td>sT/zlLzq7AK9QkTSH51L5+LSNY+zkfwrr7PlR4EOMtI=</td>\n",
+       "      <td>20190702</td>\n",
+       "      <td>1198</td>\n",
+       "      <td>7</td>\n",
+       "      <td>674245</td>\n",
+       "      <td>3452051</td>\n",
+       "      <td>190416</td>\n",
+       "      <td>0</td>\n",
+       "      <td>47600</td>\n",
+       "      <td>...</td>\n",
+       "      <td>0</td>\n",
+       "      <td>3</td>\n",
+       "      <td>3</td>\n",
+       "      <td>0.1429</td>\n",
+       "      <td>90333.0</td>\n",
+       "      <td>0.33100</td>\n",
+       "      <td>1</td>\n",
+       "      <td>5</td>\n",
+       "      <td>0.0</td>\n",
+       "      <td>0</td>\n",
+       "    </tr>\n",
+       "  </tbody>\n",
+       "</table>\n",
+       "<p>5 rows × 42 columns</p>\n",
+       "</div>"
+      ],
+      "text/plain": [
+       "   id                                        TRD_NO    REQ_DD  CP_CD  CP_NM  \\\n",
+       "0   0  9iSJiZ+6F/ojR81Swb0CU5oBNWIuJuSsmXsb7aPoWro=  20190701    270    308   \n",
+       "1   1  UStyI9p3TkoNswhaARv+Dzznl7NW4o49XlSEv/jy3/U=  20190701    837    173   \n",
+       "2   2  PgOykMEKX3so4zIpsNcU+zNt+Nj4VQdwjDB+NlVIJN4=  20190702    785    539   \n",
+       "3   3  9ngELbCK8cqbPY53oe0eUY+tPvTR/OU7KIMg0pDdh4w=  20190701   1198      7   \n",
+       "4   4  sT/zlLzq7AK9QkTSH51L5+LSNY+zkfwrr7PlR4EOMtI=  20190702   1198      7   \n",
+       "\n",
+       "   GODS_NM  PAYR_SEQ  MPHN_NO  COMMC_CLF  AC_PAY_AMT  ...  MAX_NPAY_CNT_24M  \\\n",
+       "0   394324    945077   940112          0       49900  ...                 0   \n",
+       "1   735708   1850868   919223          1       14300  ...                 0   \n",
+       "2   499519    415916    71968          2      440000  ...                 0   \n",
+       "3   272349   2477403   568377          1        9907  ...                 0   \n",
+       "4   674245   3452051   190416          0       47600  ...                 0   \n",
+       "\n",
+       "   TRD_CNT_6M  REAL_TRD_CNT_6M  NIGHT_TRD_RT_6M  AVG_AMT_6M  MAX_LMT_3M_RT  \\\n",
+       "0           5                1           0.6429    111716.0        0.49900   \n",
+       "1           5                5           0.4444     30776.0        0.21767   \n",
+       "2           6                0           0.1111    177392.0        1.00000   \n",
+       "3           6                6           0.0645    123318.0        0.52973   \n",
+       "4           3                3           0.1429     90333.0        0.33100   \n",
+       "\n",
+       "   NPAY_CNT_24M  NPAY_CNT_12MNTS  NPAY_AMT_60M  target  \n",
+       "0             1                7           0.0       0  \n",
+       "1             0                1           0.0       0  \n",
+       "2             0                2           0.0       0  \n",
+       "3             0                0           0.0       0  \n",
+       "4             1                5           0.0       0  \n",
+       "\n",
+       "[5 rows x 42 columns]"
+      ]
+     },
+     "execution_count": 9,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "train_df.head()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# Create Indices"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 10,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Starts at 2020-11-06 14:27:04.142343\n"
+     ]
+    }
+   ],
+   "source": [
+    "print(f\"Starts at {datetime.datetime.now()}\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 11,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "positive = train_df[train_df['target']==1]\n",
+    "negative = train_df[train_df['target']==0]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 12,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "274713\n",
+      "7591835\n"
+     ]
+    }
+   ],
+   "source": [
+    "print(len(positive))\n",
+    "print(len(negative))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 13,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "for seed in range(bagging_size):\n",
+    "    negative_sample = negative.sample(n=(len(positive)*negative_ratio), random_state=seed)\n",
+    "    id_list = positive.id.tolist() + negative_sample.id.tolist()\n",
+    "    joblib.dump(id_list, f\"{data_dir}indices_{seed}.pkl\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# Feture Engineering"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Basic features"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 14,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Starts at 2020-11-06 14:27:25.552254\n"
+     ]
+    }
+   ],
+   "source": [
+    "print(f\"Starts at {datetime.datetime.now()}\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 15,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "FILE_NAME = \"basic_feature\""
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 16,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "basic_features = {\n",
+    "    \"id\": \"uint32\",\n",
+    "    \"AC_PAY_AMT\": \"uint32\",\n",
+    "    \"AGE\": \"uint8\",\n",
+    "    \"SMS_RE_SND_CNT\": \"uint8\",\n",
+    "    \"ACUM_RCPT_AMT\": \"int32\",\n",
+    "    \"MAX_NPAY_CNT_24M\": \"uint8\",\n",
+    "    \"TRD_CNT_6M\": \"uint8\",\n",
+    "    \"REAL_TRD_CNT_6M\": \"uint8\",\n",
+    "    \"NPAY_CNT_24M\": \"uint8\",\n",
+    "    \"NPAY_CNT_12MNTS\": \"uint8\",\n",
+    "    \"MM_LMT_AMT\": \"float32\",\n",
+    "    \"REMD_LMT_AMT\": \"float32\",\n",
+    "    \"NPAY_AMT_24M\": \"float32\",\n",
+    "    \"NIGHT_TRD_RT_6M\": \"float32\",\n",
+    "    \"AVG_AMT_6M\": \"float32\",\n",
+    "    \"MAX_LMT_3M_RT\": \"float32\",\n",
+    "    \"NPAY_AMT_60M\": \"float32\"\n",
+    "}"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 17,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "category_features = [\n",
+    "    \"COMMC_CLF\", \"NPAY_YN\", \"PAY_MTHD_CD\", \"ARS_AUTHTI_YN\", \"GNDR\", \"FOREI_YN\",  \"AUTHTI_CLF_FLG\", \n",
+    "    \"SVC_CLF_NM\", \"CP_M_CLF_NM\", \"CP_S_CLF_NM\" \n",
+    "]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 18,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_train = train_df[list(basic_features.keys()) + category_features + [\"target\"]].astype(basic_features)\n",
+    "df_test = test_df[list(basic_features.keys()) + category_features].astype(basic_features)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 19,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "for seed in range(bagging_size):\n",
+    "    with open(f\"{data_dir}indices_{seed}.pkl\", 'rb') as f:\n",
+    "        indices = joblib.load(f)\n",
+    "    df_train.iloc[indices].to_parquet(f\"{data_dir}{FILE_NAME}_{seed}.parquet\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 20,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_test.to_parquet(f\"{data_dir}{FILE_NAME}_test.parquet\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 21,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Ends at 2020-11-06 14:27:44.582091\n"
+     ]
+    }
+   ],
+   "source": [
+    "print(f\"Ends at {datetime.datetime.now()}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## month, day (hour은 없음)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 22,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Starts at 2020-11-06 14:27:44.589925\n"
+     ]
+    }
+   ],
+   "source": [
+    "print(f\"Starts at {datetime.datetime.now()}\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 23,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "FILE_NAME = \"month_day\""
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 24,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_train = train_df[['id', 'REQ_DD']].astype({\"REQ_DD\": \"str\"})\n",
+    "df_test = test_df[['id', 'REQ_DD']].astype({\"REQ_DD\": \"str\"})"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 25,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_train['month'] = df_train.REQ_DD.astype(\"str\").str[4:6].astype(\"uint8\")\n",
+    "df_train['day'] = df_train.REQ_DD.astype(\"str\").str[6:8].astype(\"uint8\")\n",
+    "df_test['month'] = df_test.REQ_DD.astype(\"str\").str[4:6].astype(\"uint8\")\n",
+    "df_test['day'] = df_test.REQ_DD.astype(\"str\").str[6:8].astype(\"uint8\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 26,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_train = df_train[['id', 'month', 'day']]\n",
+    "df_test = df_test[['id', 'month', 'day']]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 27,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "for seed in range(bagging_size):\n",
+    "    with open(f\"{data_dir}indices_{seed}.pkl\", 'rb') as f:\n",
+    "        indices = joblib.load(f)\n",
+    "    df_train.iloc[indices].to_parquet(f\"{data_dir}{FILE_NAME}_{seed}.parquet\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 28,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_test.to_parquet(f\"{data_dir}{FILE_NAME}_test.parquet\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 29,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Ends at 2020-11-06 14:28:13.748455\n"
+     ]
+    }
+   ],
+   "source": [
+    "print(f\"Ends at {datetime.datetime.now()}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 거래금액 (AC_PAY_AMT) 49000원, 11000원\n",
+    "\n",
+    "49000원: 롤 rp 충전 최고 금액\n",
+    "\n",
+    "11000원: 아프리카 별풍선 100"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 30,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Starts at 2020-11-06 14:28:13.753604\n"
+     ]
+    }
+   ],
+   "source": [
+    "print(f\"Starts at {datetime.datetime.now()}\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 31,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "FILE_NAME = \"pay_amt\""
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 32,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_train = train_df[['id', 'AC_PAY_AMT']]\n",
+    "df_test = test_df[['id', 'AC_PAY_AMT']]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 33,
+   "metadata": {
+    "scrolled": true
+   },
+   "outputs": [
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "<ipython-input-33-96c0763cc145>:1: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame.\n",
+      "Try using .loc[row_indexer,col_indexer] = value instead\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  df_train[\"is_49900_PAY_AMT\"] = (df_train['AC_PAY_AMT']==49900)\n",
+      "<ipython-input-33-96c0763cc145>:2: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame.\n",
+      "Try using .loc[row_indexer,col_indexer] = value instead\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  df_train[\"is_11000_PAY_AMT\"] = (df_train['AC_PAY_AMT']==11000)\n",
+      "<ipython-input-33-96c0763cc145>:3: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame.\n",
+      "Try using .loc[row_indexer,col_indexer] = value instead\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  df_train[\"is_11000s_PAY_AMT\"] = (df_train['AC_PAY_AMT']%11000==0)\n",
+      "<ipython-input-33-96c0763cc145>:4: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame.\n",
+      "Try using .loc[row_indexer,col_indexer] = value instead\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  df_test[\"is_49900_PAY_AMT\"] = (df_test['AC_PAY_AMT']==49900)\n",
+      "<ipython-input-33-96c0763cc145>:5: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame.\n",
+      "Try using .loc[row_indexer,col_indexer] = value instead\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  df_test[\"is_11000_PAY_AMT\"] = (df_test['AC_PAY_AMT']==11000)\n",
+      "<ipython-input-33-96c0763cc145>:6: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame.\n",
+      "Try using .loc[row_indexer,col_indexer] = value instead\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  df_test[\"is_11000s_PAY_AMT\"] = (df_test['AC_PAY_AMT']%11000==0)\n"
+     ]
+    }
+   ],
+   "source": [
+    "df_train[\"is_49900_PAY_AMT\"] = (df_train['AC_PAY_AMT']==49900)\n",
+    "df_train[\"is_11000_PAY_AMT\"] = (df_train['AC_PAY_AMT']==11000)\n",
+    "df_train[\"is_11000s_PAY_AMT\"] = (df_train['AC_PAY_AMT']%11000==0)\n",
+    "df_test[\"is_49900_PAY_AMT\"] = (df_test['AC_PAY_AMT']==49900)\n",
+    "df_test[\"is_11000_PAY_AMT\"] = (df_test['AC_PAY_AMT']==11000)\n",
+    "df_test[\"is_11000s_PAY_AMT\"] = (df_test['AC_PAY_AMT']%11000==0)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 34,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_train = df_train[['id', 'is_49900_PAY_AMT', 'is_11000_PAY_AMT', 'is_11000s_PAY_AMT']]\n",
+    "df_test = df_test[['id', 'is_49900_PAY_AMT', 'is_11000_PAY_AMT', 'is_11000s_PAY_AMT']]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 35,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "for seed in range(bagging_size):\n",
+    "    with open(f\"{data_dir}indices_{seed}.pkl\", 'rb') as f:\n",
+    "        indices = joblib.load(f)\n",
+    "    df_train.iloc[indices].to_parquet(f\"{data_dir}{FILE_NAME}_{seed}.parquet\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 36,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_test.to_parquet(f\"{data_dir}{FILE_NAME}_test.parquet\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 37,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Ends at 2020-11-06 14:28:19.955008\n"
+     ]
+    }
+   ],
+   "source": [
+    "print(f\"Ends at {datetime.datetime.now()}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 개인당 IP 갯수 (PAYR_IP, PAYR_SEQ)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 38,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Starts at 2020-11-06 14:28:19.960165\n"
+     ]
+    }
+   ],
+   "source": [
+    "print(f\"Starts at {datetime.datetime.now()}\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 39,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "FILE_NAME = \"ip_cnt_wrt_seq\""
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 40,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_train = train_df[['id', 'PAYR_IP', 'PAYR_SEQ']]\n",
+    "df_test = test_df[['id', 'PAYR_SEQ']]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 41,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "count_df = df_train[['PAYR_IP', 'PAYR_SEQ']].groupby(by=[\"PAYR_SEQ\"]).agg(['nunique']).reset_index()\n",
+    "count_df.columns = [\"PAYR_SEQ\", \"ip_cnt_wrt_seq\"]\n",
+    "df_train = df_train.merge(count_df, on=['PAYR_SEQ'], how=\"left\")[['id', 'ip_cnt_wrt_seq']]\n",
+    "df_test = df_test.merge(count_df, on=['PAYR_SEQ'], how=\"left\")[['id', 'ip_cnt_wrt_seq']]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 42,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "for seed in range(bagging_size):\n",
+    "    with open(f\"{data_dir}indices_{seed}.pkl\", 'rb') as f:\n",
+    "        indices = joblib.load(f)\n",
+    "    df_train.iloc[indices].to_parquet(f\"{data_dir}{FILE_NAME}_{seed}.parquet\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 43,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_test.to_parquet(f\"{data_dir}{FILE_NAME}_test.parquet\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 44,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Ends at 2020-11-06 14:28:38.402140\n"
+     ]
+    }
+   ],
+   "source": [
+    "print(f\"Ends at {datetime.datetime.now()}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## IP당 개인수 (PAYR_IP, PAYR_SEQ)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 45,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Starts at 2020-11-06 14:28:38.409316\n"
+     ]
+    }
+   ],
+   "source": [
+    "print(f\"Starts at {datetime.datetime.now()}\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 46,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "FILE_NAME = \"seq_cnt_wrt_ip\""
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 47,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_train = train_df[['id', 'PAYR_IP', 'PAYR_SEQ']]\n",
+    "df_test = test_df[['id', 'PAYR_IP']]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 48,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "count_df = df_train[['PAYR_IP', 'PAYR_SEQ']].groupby(by=[\"PAYR_IP\"]).agg(['nunique']).reset_index()\n",
+    "count_df.columns = [\"PAYR_IP\", \"seq_cnt_wrt_ip\"]\n",
+    "df_train = df_train.merge(count_df, on=['PAYR_IP'], how=\"left\")[['id', 'seq_cnt_wrt_ip']]\n",
+    "df_test = df_test.merge(count_df, on=['PAYR_IP'], how=\"left\")[['id', 'seq_cnt_wrt_ip']]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 49,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "for seed in range(bagging_size):\n",
+    "    with open(f\"{data_dir}indices_{seed}.pkl\", 'rb') as f:\n",
+    "        indices = joblib.load(f)\n",
+    "    df_train.iloc[indices].to_parquet(f\"{data_dir}{FILE_NAME}_{seed}.parquet\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 50,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_test.to_parquet(f\"{data_dir}{FILE_NAME}_test.parquet\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 51,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Ends at 2020-11-06 14:28:56.038771\n"
+     ]
+    }
+   ],
+   "source": [
+    "print(f\"Ends at {datetime.datetime.now()}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 개인당 휴대폰 갯수 (MPHN_NO, PAYR_SEQ)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 52,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Starts at 2020-11-06 14:28:56.045166\n"
+     ]
+    }
+   ],
+   "source": [
+    "print(f\"Starts at {datetime.datetime.now()}\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 53,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "FILE_NAME = \"phone_cnt_wrt_seq\""
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 54,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_train = train_df[['id', 'MPHN_NO', 'PAYR_SEQ']]\n",
+    "df_test = test_df[['id', 'PAYR_SEQ']]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 55,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "count_df = df_train[['MPHN_NO', 'PAYR_SEQ']].groupby(by=[\"PAYR_SEQ\"]).agg(['nunique']).reset_index()\n",
+    "count_df.columns = [\"PAYR_SEQ\", \"phone_cnt_wrt_seq\"]\n",
+    "df_train = df_train.merge(count_df, on=['PAYR_SEQ'], how=\"left\")[['id', 'phone_cnt_wrt_seq']]\n",
+    "df_test = df_test.merge(count_df, on=['PAYR_SEQ'], how=\"left\")[['id', 'phone_cnt_wrt_seq']]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 56,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "for seed in range(bagging_size):\n",
+    "    with open(f\"{data_dir}indices_{seed}.pkl\", 'rb') as f:\n",
+    "        indices = joblib.load(f)\n",
+    "    df_train.iloc[indices].to_parquet(f\"{data_dir}{FILE_NAME}_{seed}.parquet\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 57,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_test.to_parquet(f\"{data_dir}{FILE_NAME}_test.parquet\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 58,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Ends at 2020-11-06 14:29:13.243795\n"
+     ]
+    }
+   ],
+   "source": [
+    "print(f\"Ends at {datetime.datetime.now()}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 가게/상품별 개인당 휴대폰 갯수 "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 59,
+   "metadata": {
+    "scrolled": true
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Starts at 2020-11-06 14:29:13.250903\n"
+     ]
+    }
+   ],
+   "source": [
+    "print(f\"Starts at {datetime.datetime.now()}\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 60,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "FILE_NAME = \"avg_phone_cnt\""
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 61,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_train = train_df[['id', 'MPHN_NO', 'PAYR_SEQ', 'CP_CD', 'GODS_NM']]\n",
+    "df_test = test_df[['id', 'PAYR_SEQ', 'CP_CD', 'GODS_NM']]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 62,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "count_df = df_train[['MPHN_NO', 'PAYR_SEQ']].groupby(by=[\"PAYR_SEQ\"]).agg(['nunique']).reset_index()\n",
+    "count_df.columns = [\"PAYR_SEQ\", \"phone_cnt_wrt_seq\"]\n",
+    "df_train = df_train.merge(count_df, on=['PAYR_SEQ'], how=\"left\")[['id', 'phone_cnt_wrt_seq', 'CP_CD', 'GODS_NM']]\n",
+    "df_test = df_test.merge(count_df, on=['PAYR_SEQ'], how=\"left\")[['id', 'phone_cnt_wrt_seq', 'CP_CD', 'GODS_NM']]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 63,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "avg_df = df_train[['phone_cnt_wrt_seq', 'CP_CD']].groupby(by=['CP_CD']).agg(['mean']).reset_index()\n",
+    "avg_df.columns = [\"CP_CD\", \"avg_phone_cnt_of_seq_wrt_cp\"]\n",
+    "df_train = df_train.merge(avg_df, on=['CP_CD'], how='left')\n",
+    "df_test = df_test.merge(avg_df, on=['CP_CD'], how='left')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 64,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "avg_df = df_train[['phone_cnt_wrt_seq', 'GODS_NM']].groupby(by=['GODS_NM']).agg(['mean']).reset_index()\n",
+    "avg_df.columns = [\"GODS_NM\", \"avg_phone_cnt_of_seq_wrt_gods\"]\n",
+    "df_train = df_train.merge(avg_df, on=['GODS_NM'], how='left')\n",
+    "df_test = df_test.merge(avg_df, on=['GODS_NM'], how='left')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 65,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_train = df_train[['id', 'avg_phone_cnt_of_seq_wrt_cp', 'avg_phone_cnt_of_seq_wrt_gods']]\n",
+    "df_test = df_test[['id', 'avg_phone_cnt_of_seq_wrt_cp', 'avg_phone_cnt_of_seq_wrt_gods']]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 66,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "for seed in range(bagging_size):\n",
+    "    with open(f\"{data_dir}indices_{seed}.pkl\", 'rb') as f:\n",
+    "        indices = joblib.load(f)\n",
+    "    df_train.iloc[indices].to_parquet(f\"{data_dir}{FILE_NAME}_{seed}.parquet\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 67,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_test.to_parquet(f\"{data_dir}{FILE_NAME}_test.parquet\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 68,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Ends at 2020-11-06 14:29:38.479749\n"
+     ]
+    }
+   ],
+   "source": [
+    "print(f\"Ends at {datetime.datetime.now()}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 최초 3일 여부"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 69,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Starts at 2020-11-06 14:29:38.486637\n"
+     ]
+    }
+   ],
+   "source": [
+    "print(f\"Starts at {datetime.datetime.now()}\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 70,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "FILE_NAME = \"first_days\""
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 71,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_train = train_df[['id', 'REQ_DD']].astype({\"REQ_DD\": \"str\"})\n",
+    "df_test = test_df[['id', 'REQ_DD']].astype({\"REQ_DD\": \"str\"})"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 72,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_train['day'] = df_train.REQ_DD.astype(\"str\").str[6:8].astype(\"uint8\")\n",
+    "df_test['day'] = df_test.REQ_DD.astype(\"str\").str[6:8].astype(\"uint8\")\n",
+    "df_train['is_first_days'] = (df_train['day']<=3)\n",
+    "df_test['is_first_days'] = (df_test['day']<=3)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 73,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_train = df_train[['id', 'is_first_days']]\n",
+    "df_test = df_test[['id', 'is_first_days']]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 74,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "for seed in range(bagging_size):\n",
+    "    with open(f\"{data_dir}indices_{seed}.pkl\", 'rb') as f:\n",
+    "        indices = joblib.load(f)\n",
+    "    df_train.iloc[indices].to_parquet(f\"{data_dir}{FILE_NAME}_{seed}.parquet\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 75,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_test.to_parquet(f\"{data_dir}{FILE_NAME}_test.parquet\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 76,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Ends at 2020-11-06 14:30:00.434824\n"
+     ]
+    }
+   ],
+   "source": [
+    "print(f\"Ends at {datetime.datetime.now()}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 가게 관련 feature (CP_CD)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 77,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Starts at 2020-11-06 14:30:00.440436\n"
+     ]
+    }
+   ],
+   "source": [
+    "print(f\"Starts at {datetime.datetime.now()}\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 78,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "FILE_NAME = \"cp_features\""
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 79,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_train = train_df[['id', 'CP_CD', 'PAYR_SEQ', 'GODS_NM', 'PAYR_IP', 'MPHN_NO', 'AGE', 'ARS_AUTHTI_YN', 'NPAY_AMT_60M',\n",
+    "                     'NPAY_YN', 'NPAY_AMT_24M', 'MAX_NPAY_CNT_24M', 'NIGHT_TRD_RT_6M', 'NPAY_CNT_24M', 'NPAY_CNT_12MNTS']]\n",
+    "df_test = test_df[['id', 'CP_CD', 'PAYR_SEQ', 'GODS_NM', 'PAYR_IP', 'MPHN_NO', 'AGE', 'ARS_AUTHTI_YN', 'NPAY_AMT_60M',\n",
+    "                     'NPAY_YN', 'NPAY_AMT_24M', 'MAX_NPAY_CNT_24M', 'NIGHT_TRD_RT_6M', 'NPAY_CNT_24M', 'NPAY_CNT_12MNTS']]"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "- count (might be quantized)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 80,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "count_df = df_train[['id', 'CP_CD']].groupby(by=[\"CP_CD\"]).count().reset_index()\n",
+    "count_df.columns = [\"CP_CD\", \"cp_count\"]\n",
+    "df_train = df_train.merge(count_df, on=['CP_CD'], how=\"left\")\n",
+    "df_test = df_test.merge(count_df, on=['CP_CD'], how=\"left\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "- unique count of 상품\n",
+    "- unique count of 고객"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 81,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "count_df = df_train[['CP_CD', 'GODS_NM']].groupby(by=[\"CP_CD\"]).agg(['nunique']).reset_index()\n",
+    "count_df.columns = [\"CP_CD\", \"unique_gods_count_wrt_cp\"]\n",
+    "df_train = df_train.merge(count_df, on=['CP_CD'], how=\"left\")\n",
+    "df_test = df_test.merge(count_df, on=['CP_CD'], how=\"left\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 82,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "count_df = df_train[['CP_CD', 'PAYR_SEQ']].groupby(by=[\"CP_CD\"]).agg(['nunique']).reset_index()\n",
+    "count_df.columns = [\"CP_CD\", \"unique_seq_count_wrt_cp\"]\n",
+    "df_train = df_train.merge(count_df, on=['CP_CD'], how=\"left\")\n",
+    "df_test = df_test.merge(count_df, on=['CP_CD'], how=\"left\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "- unique count of IP / unique count of 휴대폰번호\n",
+    "- unique count of 상품 / unique count of 고객\n",
+    "- unique count of IP / unique count of 고객\n",
+    "- unique count of 휴대폰번호 / unique count of 고객"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 83,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "count_df = df_train[['CP_CD', 'PAYR_IP']].groupby(by=[\"CP_CD\"]).agg(['nunique']).reset_index()\n",
+    "count_df.columns = [\"CP_CD\", \"unique_ip_count_wrt_cp\"]\n",
+    "df_train = df_train.merge(count_df, on=['CP_CD'], how=\"left\")\n",
+    "df_test = df_test.merge(count_df, on=['CP_CD'], how=\"left\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 84,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "count_df = df_train[['CP_CD', 'MPHN_NO']].groupby(by=[\"CP_CD\"]).agg(['nunique']).reset_index()\n",
+    "count_df.columns = [\"CP_CD\", \"unique_phone_count_wrt_cp\"]\n",
+    "df_train = df_train.merge(count_df, on=['CP_CD'], how=\"left\")\n",
+    "df_test = df_test.merge(count_df, on=['CP_CD'], how=\"left\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "unique count of IP / unique count of 휴대폰번호"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 85,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_train['unique_ip_per_unique_phone_wrt_cd'] = df_train['unique_ip_count_wrt_cp'] / df_train['unique_phone_count_wrt_cp']\n",
+    "df_test['unique_ip_per_unique_phone_wrt_cd'] = df_test['unique_ip_count_wrt_cp'] / df_test['unique_phone_count_wrt_cp']"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "unique count of 상품 / unique count of 고객"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 86,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_train['unique_gods_per_unique_seq_wrt_cd'] = df_train['unique_gods_count_wrt_cp'] / df_train['unique_seq_count_wrt_cp']\n",
+    "df_test['unique_gods_per_unique_seq_wrt_cd'] = df_test['unique_gods_count_wrt_cp'] / df_test['unique_seq_count_wrt_cp']"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "unique count of IP / unique count of 고객"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 87,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_train['unique_ip_per_unique_seq_wrt_cd'] = df_train['unique_ip_count_wrt_cp'] / df_train['unique_seq_count_wrt_cp']\n",
+    "df_test['unique_ip_per_unique_seq_wrt_cd'] = df_test['unique_ip_count_wrt_cp'] / df_test['unique_seq_count_wrt_cp']"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "unique count of 휴대폰번호 / unique count of 고객"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 88,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_train['unique_phone_per_unique_seq_wrt_cd'] = df_train['unique_phone_count_wrt_cp'] / df_train['unique_seq_count_wrt_cp']\n",
+    "df_test['unique_phone_per_unique_seq_wrt_cd'] = df_test['unique_phone_count_wrt_cp'] / df_test['unique_seq_count_wrt_cp']"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "가게's avg, 25% percentile/median/75% percentile age"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 89,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "count_df = df_train[['CP_CD', 'AGE']].groupby(by=[\"CP_CD\"]).agg(['mean']).reset_index()\n",
+    "count_df.columns = [\"CP_CD\", \"age_avg_quartile_wrt_cp\"]\n",
+    "df_train = df_train.merge(count_df, on=['CP_CD'], how=\"left\")\n",
+    "df_test = df_test.merge(count_df, on=['CP_CD'], how=\"left\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 90,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "count_df = df_train[['CP_CD', 'AGE']].groupby(by=[\"CP_CD\"]).quantile(.25).reset_index()\n",
+    "count_df.columns = [\"CP_CD\", \"age_first_quartile_wrt_cp\"]\n",
+    "df_train = df_train.merge(count_df, on=['CP_CD'], how=\"left\")\n",
+    "df_test = df_test.merge(count_df, on=['CP_CD'], how=\"left\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 91,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "count_df = df_train[['CP_CD', 'AGE']].groupby(by=[\"CP_CD\"]).quantile(.5).reset_index()\n",
+    "count_df.columns = [\"CP_CD\", \"age_second_quartile_wrt_cp\"]\n",
+    "df_train = df_train.merge(count_df, on=['CP_CD'], how=\"left\")\n",
+    "df_test = df_test.merge(count_df, on=['CP_CD'], how=\"left\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 92,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "count_df = df_train[['CP_CD', 'AGE']].groupby(by=[\"CP_CD\"]).quantile(.75).reset_index()\n",
+    "count_df.columns = [\"CP_CD\", \"age_third_quartile_wrt_cp\"]\n",
+    "df_train = df_train.merge(count_df, on=['CP_CD'], how=\"left\")\n",
+    "df_test = df_test.merge(count_df, on=['CP_CD'], how=\"left\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "- proportion of ARS_AUTHTI_YN (if nan, -1)\n",
+    "  - Y: 1, N: 0, None: 2"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 93,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_train['ARS_AUTHTI_YN'] = [np.nan if x == 2 else x for x in df_train['ARS_AUTHTI_YN']]\n",
+    "df_test['ARS_AUTHTI_YN'] = [np.nan if x == 2 else x for x in df_test['ARS_AUTHTI_YN']]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 94,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "count_df = df_train[['CP_CD', 'ARS_AUTHTI_YN']].groupby(by=[\"CP_CD\"]).sum().reset_index()\n",
+    "count_df.columns = [\"CP_CD\", \"ars_count\"]\n",
+    "df_train = df_train.merge(count_df, on=['CP_CD'], how=\"left\")\n",
+    "df_test = df_test.merge(count_df, on=['CP_CD'], how=\"left\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 95,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_train['prop_ars_wrt_cp'] = df_train['ars_count'] / df_train['cp_count']\n",
+    "df_test['prop_ars_wrt_cp'] = df_test['ars_count'] / df_test['cp_count']\n",
+    "\n",
+    "df_train['prop_ars_wrt_cp'] = [-1 if np.isnan(x) else x for x in df_train['ARS_AUTHTI_YN']]\n",
+    "df_test['prop_ars_wrt_cp'] = [-1 if np.isnan(x) else x for x in df_test['ARS_AUTHTI_YN']]"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "- proportion of NPAY_YN (if nan, -1)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 96,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_train['NPAY_YN'] = [np.nan if x == 2 else x for x in df_train['NPAY_YN']]\n",
+    "df_test['NPAY_YN'] = [np.nan if x == 2 else x for x in df_test['NPAY_YN']]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 97,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "count_df = df_train[['CP_CD', 'NPAY_YN']].groupby(by=[\"CP_CD\"]).sum().reset_index()\n",
+    "count_df.columns = [\"CP_CD\", \"npay_yn_count\"]\n",
+    "df_train = df_train.merge(count_df, on=['CP_CD'], how=\"left\")\n",
+    "df_test = df_test.merge(count_df, on=['CP_CD'], how=\"left\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 98,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_train['prop_npay_yn_wrt_cp'] = df_train['npay_yn_count'] / df_train['cp_count']\n",
+    "df_test['prop_npay_yn_wrt_cp'] = df_test['npay_yn_count'] / df_test['cp_count']\n",
+    "\n",
+    "df_train['prop_npay_yn_wrt_cp'] = [-1 if np.isnan(x) else x for x in df_train['NPAY_YN']]\n",
+    "df_test['prop_npay_yn_wrt_cp'] = [-1 if np.isnan(x) else x for x in df_test['NPAY_YN']]"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "- avg of NPAY_AMT_24M"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 99,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "count_df = df_train[['CP_CD', 'NPAY_AMT_24M']].groupby(by=[\"CP_CD\"]).mean().reset_index()\n",
+    "count_df.columns = [\"CP_CD\", \"avg_npay_amt_24m_wrt_cp\"]\n",
+    "df_train = df_train.merge(count_df, on=['CP_CD'], how=\"left\")\n",
+    "df_test = df_test.merge(count_df, on=['CP_CD'], how=\"left\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "- avg of MAX_NPAY_CNT_24M"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 100,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "count_df = df_train[['CP_CD', 'MAX_NPAY_CNT_24M']].groupby(by=[\"CP_CD\"]).mean().reset_index()\n",
+    "count_df.columns = [\"CP_CD\", \"avg_max_npay_cnt_24m_wrt_cp\"]\n",
+    "df_train = df_train.merge(count_df, on=['CP_CD'], how=\"left\")\n",
+    "df_test = df_test.merge(count_df, on=['CP_CD'], how=\"left\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "- avg of NIGHT_TRD_RT_6M"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 101,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "count_df = df_train[['CP_CD', 'NIGHT_TRD_RT_6M']].groupby(by=[\"CP_CD\"]).mean().reset_index()\n",
+    "count_df.columns = [\"CP_CD\", \"avg_night_trd_rt_6m_wrt_cp\"]\n",
+    "df_train = df_train.merge(count_df, on=['CP_CD'], how=\"left\")\n",
+    "df_test = df_test.merge(count_df, on=['CP_CD'], how=\"left\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "- avg of NPAY_CNT_24M"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 102,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "count_df = df_train[['CP_CD', 'NPAY_CNT_24M']].groupby(by=[\"CP_CD\"]).mean().reset_index()\n",
+    "count_df.columns = [\"CP_CD\", \"avg_npay_cnt_24m_wrt_cp\"]\n",
+    "df_train = df_train.merge(count_df, on=['CP_CD'], how=\"left\")\n",
+    "df_test = df_test.merge(count_df, on=['CP_CD'], how=\"left\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "- avg of NPAY_CNT_12MNTS"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 103,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "count_df = df_train[['CP_CD', 'NPAY_CNT_12MNTS']].groupby(by=[\"CP_CD\"]).mean().reset_index()\n",
+    "count_df.columns = [\"CP_CD\", \"avg_npay_cnt_12mnts_wrt_cp\"]\n",
+    "df_train = df_train.merge(count_df, on=['CP_CD'], how=\"left\")\n",
+    "df_test = df_test.merge(count_df, on=['CP_CD'], how=\"left\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "- avg of NPAY_AMT_60M"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 104,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "count_df = df_train[['CP_CD', 'NPAY_AMT_60M']].groupby(by=[\"CP_CD\"]).mean().reset_index()\n",
+    "count_df.columns = [\"CP_CD\", \"avg_npay_amt_60m_wrt_cp\"]\n",
+    "df_train = df_train.merge(count_df, on=['CP_CD'], how=\"left\")\n",
+    "df_test = df_test.merge(count_df, on=['CP_CD'], how=\"left\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 105,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "('avg_npay_cnt_24m_wrt_cp',\n",
+       " 'avg_npay_cnt_12mnts_wrt_cp',\n",
+       " 'avg_npay_amt_60m_wrt_cp')"
+      ]
+     },
+     "execution_count": 105,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "\"cp_count\", \"unique_gods_count_wrt_cp\", \"unique_seq_count_wrt_cp\", \"unique_ip_per_unique_phone_wrt_cd\", \n",
+    "\"unique_gods_per_unique_seq_wrt_cd\", \"unique_ip_per_unique_seq_wrt_cd\", \"unique_phone_per_unique_seq_wrt_cd\", \n",
+    "\"age_avg_quartile_wrt_cp\", \"age_first_quartile_wrt_cp\", \"age_second_quartile_wrt_cp\", \"age_third_quartile_wrt_cp\",\n",
+    "\"prop_ars_wrt_cp\", \"prop_npay_yn_wrt_cp\", \"avg_npay_amt_24m_wrt_cp\", \"avg_max_npay_cnt_24m_wrt_cp\", \"avg_night_trd_rt_6m_wrt_cp\",\n",
+    "\"avg_npay_cnt_24m_wrt_cp\", \"avg_npay_cnt_12mnts_wrt_cp\", \"avg_npay_amt_60m_wrt_cp\""
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 106,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_train = df_train[[\"id\", \"cp_count\", \"unique_gods_count_wrt_cp\", \"unique_seq_count_wrt_cp\", \"unique_ip_per_unique_phone_wrt_cd\", \n",
+    "\"unique_gods_per_unique_seq_wrt_cd\", \"unique_ip_per_unique_seq_wrt_cd\", \"unique_phone_per_unique_seq_wrt_cd\", \n",
+    "\"age_avg_quartile_wrt_cp\", \"age_first_quartile_wrt_cp\", \"age_second_quartile_wrt_cp\", \"age_third_quartile_wrt_cp\",\n",
+    "\"prop_ars_wrt_cp\", \"prop_npay_yn_wrt_cp\", \"avg_npay_amt_24m_wrt_cp\", \"avg_max_npay_cnt_24m_wrt_cp\", \"avg_night_trd_rt_6m_wrt_cp\",\n",
+    "\"avg_npay_cnt_24m_wrt_cp\", \"avg_npay_cnt_12mnts_wrt_cp\", \"avg_npay_amt_60m_wrt_cp\"]]\n",
+    "\n",
+    "df_test = df_test[[\"id\", \"cp_count\", \"unique_gods_count_wrt_cp\", \"unique_seq_count_wrt_cp\", \"unique_ip_per_unique_phone_wrt_cd\", \n",
+    "\"unique_gods_per_unique_seq_wrt_cd\", \"unique_ip_per_unique_seq_wrt_cd\", \"unique_phone_per_unique_seq_wrt_cd\", \n",
+    "\"age_avg_quartile_wrt_cp\", \"age_first_quartile_wrt_cp\", \"age_second_quartile_wrt_cp\", \"age_third_quartile_wrt_cp\",\n",
+    "\"prop_ars_wrt_cp\", \"prop_npay_yn_wrt_cp\", \"avg_npay_amt_24m_wrt_cp\", \"avg_max_npay_cnt_24m_wrt_cp\", \"avg_night_trd_rt_6m_wrt_cp\",\n",
+    "\"avg_npay_cnt_24m_wrt_cp\", \"avg_npay_cnt_12mnts_wrt_cp\", \"avg_npay_amt_60m_wrt_cp\"]]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 107,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "for seed in range(bagging_size):\n",
+    "    with open(f\"{data_dir}indices_{seed}.pkl\", 'rb') as f:\n",
+    "        indices = joblib.load(f)\n",
+    "    df_train.iloc[indices].to_parquet(f\"{data_dir}{FILE_NAME}_{seed}.parquet\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 108,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "df_test.to_parquet(f\"{data_dir}{FILE_NAME}_test.parquet\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 109,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Ends at 2020-11-06 14:34:28.192622\n"
+     ]
+    }
+   ],
+   "source": [
+    "print(f\"Ends at {datetime.datetime.now()}\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.8.6"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 4
+}
